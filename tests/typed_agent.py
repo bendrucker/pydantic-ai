@@ -292,8 +292,8 @@ text_output_with_ctx = TextOutput(str_to_regex_with_ctx)
 assert_type(text_output_with_ctx, TextOutput[re.Pattern[str], int])
 Agent('test', output_type=text_output_with_ctx, deps_type=int)
 Agent('test', output_type=text_output_with_ctx, deps_type=bool)  # bool is subclass of int, works with contravariant
-Agent('test', output_type=text_output_with_ctx, deps_type=str)  # pyright: ignore[reportArgumentType,reportCallIssue]  # type: ignore[arg-type]
-Agent('test', output_type=text_output_with_ctx)  # pyright: ignore[reportArgumentType,reportCallIssue]  # type: ignore[arg-type]
+Agent('test', output_type=text_output_with_ctx, deps_type=str)  # type: ignore[arg-type]  # pyright: ignore[reportArgumentType,reportCallIssue]
+Agent('test', output_type=text_output_with_ctx)  # pyright: ignore[reportArgumentType,reportCallIssue]
 
 # prepare example from docs:
 
