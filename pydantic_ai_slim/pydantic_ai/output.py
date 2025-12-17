@@ -35,6 +35,8 @@ __all__ = (
 T = TypeVar('T')
 T_co = TypeVar('T_co', covariant=True)
 TextOutputAgentDepsT = TypeVar('TextOutputAgentDepsT', default=None, contravariant=True)
+# default=Any for backward compat
+OutputSpecDepsT = TypeVar('OutputSpecDepsT', default=Any)
 
 OutputDataT = TypeVar('OutputDataT', default=str, covariant=True)
 """Covariant type variable for the output data type of a run."""
@@ -356,14 +358,18 @@ def StructuredDict(
 
 _OutputSpecItem = TypeAliasType(
     '_OutputSpecItem',
-    OutputTypeOrFunction[T_co] | ToolOutput[T_co] | NativeOutput[T_co] | PromptedOutput[T_co] | TextOutput[T_co, Any],
-    type_params=(T_co,),
+    OutputTypeOrFunction[T_co]
+    | ToolOutput[T_co]
+    | NativeOutput[T_co]
+    | PromptedOutput[T_co]
+    | TextOutput[T_co, OutputSpecDepsT],
+    type_params=(T_co, OutputSpecDepsT),
 )
 
 OutputSpec = TypeAliasType(
     'OutputSpec',
-    _OutputSpecItem[T_co] | Sequence['OutputSpec[T_co]'],
-    type_params=(T_co,),
+    _OutputSpecItem[T_co, OutputSpecDepsT] | Sequence['OutputSpec[T_co, OutputSpecDepsT]'],
+    type_params=(T_co, OutputSpecDepsT),
 )
 """Specification of the agent's output data.
 

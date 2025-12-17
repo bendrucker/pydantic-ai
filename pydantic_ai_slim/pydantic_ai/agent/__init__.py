@@ -133,7 +133,7 @@ class Agent(AbstractAgent[AgentDepsT, OutputDataT]):
     be merged with this value, with the runtime argument taking priority.
     """
 
-    _output_type: OutputSpec[OutputDataT]
+    _output_type: OutputSpec[OutputDataT, AgentDepsT]
 
     instrument: InstrumentationSettings | bool | None
     """Options to automatically instrument with OpenTelemetry."""
@@ -170,7 +170,7 @@ class Agent(AbstractAgent[AgentDepsT, OutputDataT]):
         self,
         model: models.Model | models.KnownModelName | str | None = None,
         *,
-        output_type: OutputSpec[OutputDataT] = str,
+        output_type: OutputSpec[OutputDataT, AgentDepsT] = str,
         instructions: Instructions[AgentDepsT] = None,
         system_prompt: str | Sequence[str] = (),
         deps_type: type[AgentDepsT] = NoneType,
@@ -198,7 +198,7 @@ class Agent(AbstractAgent[AgentDepsT, OutputDataT]):
         self,
         model: models.Model | models.KnownModelName | str | None = None,
         *,
-        output_type: OutputSpec[OutputDataT] = str,
+        output_type: OutputSpec[OutputDataT, AgentDepsT] = str,
         instructions: Instructions[AgentDepsT] = None,
         system_prompt: str | Sequence[str] = (),
         deps_type: type[AgentDepsT] = NoneType,
@@ -224,7 +224,7 @@ class Agent(AbstractAgent[AgentDepsT, OutputDataT]):
         self,
         model: models.Model | models.KnownModelName | str | None = None,
         *,
-        output_type: OutputSpec[OutputDataT] = str,
+        output_type: OutputSpec[OutputDataT, AgentDepsT] = str,
         instructions: Instructions[AgentDepsT] = None,
         system_prompt: str | Sequence[str] = (),
         deps_type: type[AgentDepsT] = NoneType,
@@ -419,7 +419,7 @@ class Agent(AbstractAgent[AgentDepsT, OutputDataT]):
         return self._deps_type
 
     @property
-    def output_type(self) -> OutputSpec[OutputDataT]:
+    def output_type(self) -> OutputSpec[OutputDataT, AgentDepsT]:
         """The type of data output by agent runs, used to validate the data returned by the model, defaults to `str`."""
         return self._output_type
 
