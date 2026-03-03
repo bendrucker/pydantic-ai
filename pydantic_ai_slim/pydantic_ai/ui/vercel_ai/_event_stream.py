@@ -249,6 +249,8 @@ class VercelAIEventStream(UIEventStream[RequestData, BaseChunk, AgentDepsT, Outp
     async def handle_builtin_tool_return(self, part: BuiltinToolReturnPart) -> AsyncIterator[BaseChunk]:
         if self.sdk_version >= 6 and part.outcome == 'denied':
             yield ToolOutputDeniedChunk(tool_call_id=part.tool_call_id)
+        elif part.outcome == 'error':
+            yield ToolOutputErrorChunk(tool_call_id=part.tool_call_id, error_text=part.model_response_str())
         else:
             yield ToolOutputAvailableChunk(
                 tool_call_id=part.tool_call_id,
