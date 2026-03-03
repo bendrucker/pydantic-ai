@@ -2515,7 +2515,7 @@ async def test_tool_output_denied_chunk_emission():
                         content='User cancelled the deletion',
                         tool_call_id='delete_1',
                         timestamp=IsDatetime(),
-                        status='denied',
+                        outcome='denied',
                     ),
                 ],
                 timestamp=IsDatetime(),
@@ -3240,7 +3240,7 @@ async def test_adapter_load_messages():
                         tool_call_id='toolu_01W2yGpGQcMx7pXV2z',
                         timestamp=IsDatetime(),
                         provider_name='openai',
-                        status='error',
+                        outcome='error',
                     ),
                     TextPart(
                         content='Here are the Table of Contents for both repositories:... Both products are designed to work together - Pydantic AI for building AI agents and Logfire for observing and monitoring them in production.'
@@ -5237,7 +5237,7 @@ async def test_adapter_builtin_tool_error_part_with_provider_metadata():
                     tool_call_id='bt_err_123',
                     provider_name='openai',
                     provider_details={'error_code': 'RATE_LIMIT'},
-                    status='error',
+                    outcome='error',
                 ),
             ]
         ),
@@ -5406,7 +5406,7 @@ async def test_adapter_load_messages_builtin_tool_error_with_provider_details():
                         timestamp=IsDatetime(),
                         provider_name='openai',
                         provider_details={'error_code': 'RATE_LIMIT'},
-                        status='error',
+                        outcome='error',
                     ),
                 ],
                 timestamp=IsDatetime(),
@@ -5986,7 +5986,7 @@ async def test_event_stream_builtin_tool_return_denied():
                 tool_name='web_search',
                 tool_call_id='tc_denied',
                 content='Blocked by policy',
-                status='denied',
+                outcome='denied',
             ),
         )
 
@@ -6191,7 +6191,7 @@ async def test_adapter_load_messages_output_denied(reason: str | None, expected_
                         content=expected_content,
                         tool_call_id='tc_denied',
                         timestamp=IsDatetime(),
-                        status='denied',
+                        outcome='denied',
                     )
                 ]
             ),
@@ -6233,7 +6233,7 @@ async def test_adapter_load_messages_output_denied_builtin_tool():
                         content='Blocked by policy',
                         tool_call_id='tc_builtin_denied',
                         timestamp=IsDatetime(),
-                        status='denied',
+                        outcome='denied',
                     ),
                 ],
                 timestamp=IsDatetime(),
@@ -6252,7 +6252,7 @@ async def test_denied_dynamic_tool_round_trip():
         ),
         ModelRequest(
             parts=[
-                ToolReturnPart(tool_name='delete_file', content='Too dangerous', tool_call_id='tc1', status='denied')
+                ToolReturnPart(tool_name='delete_file', content='Too dangerous', tool_call_id='tc1', outcome='denied')
             ],
         ),
     ]
@@ -6282,7 +6282,7 @@ async def test_denied_dynamic_tool_round_trip():
                         content='Too dangerous',
                         tool_call_id='tc1',
                         timestamp=IsDatetime(),
-                        status='denied',
+                        outcome='denied',
                     )
                 ]
             ),
@@ -6302,7 +6302,7 @@ async def test_denied_builtin_tool_round_trip():
                     tool_name='web_search',
                     content='Blocked by policy',
                     tool_call_id='tc2',
-                    status='denied',
+                    outcome='denied',
                 ),
             ],
         ),
@@ -6330,7 +6330,7 @@ async def test_denied_builtin_tool_round_trip():
                         content='Blocked by policy',
                         tool_call_id='tc2',
                         timestamp=IsDatetime(),
-                        status='denied',
+                        outcome='denied',
                     ),
                 ],
                 timestamp=IsDatetime(),
