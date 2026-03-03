@@ -546,7 +546,6 @@ class VercelAIAdapter(UIAdapter[RequestData, UIMessage, BaseChunk, AgentDepsT, O
                                 type=tool_name,
                                 tool_call_id=part.tool_call_id,
                                 input=_safe_args_as_dict(part),
-                                state='output-denied',
                                 provider_executed=True,
                                 call_provider_metadata=combined_provider_meta,
                                 approval=ToolApprovalResponded(
