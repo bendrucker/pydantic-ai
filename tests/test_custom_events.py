@@ -21,6 +21,7 @@ from pydantic_ai.messages import (
     CUSTOM_EVENT_TYPES,
     AgentStreamEvent,
     CustomEvent,
+    FunctionToolCallEvent,
     ModelMessage,
     ModelRequest,
     ModelResponse,
@@ -256,6 +257,67 @@ async def test_surfaced_via_run_stream_events():
 
     custom = [event for event in events if isinstance(event, CustomEvent)]
     assert custom == snapshot([ProgressEvent(payload={'pct': 50}, tool_call_id='call_1', tool_name='progress')])
+
+
+async def test_run_stream_events_emit_during_tool_call():
+    """`AgentRunEvents.emit` reaches the consumer while a tool call is still running."""
+    released = asyncio.Event()
+    agent = Agent(FunctionModel(stream_function=_tool_then_text))
+
+    @agent.tool
+    async def progress(ctx: RunContext[Any]) -> str:
+        # The tool only returns once the consumer has seen the emitted event, so the run produces
+        # no events of its own in between.
+        await released.wait()
+        return 'ok'
+
+    emitting: asyncio.Task[ExternalEvent] | None = None
+    seen: list[str] = []
+    async with agent.run_stream_events('go') as stream:
+        async for event in stream:
+            seen.append(type(event).__name__)
+            if isinstance(event, FunctionToolCallEvent):
+                emitting = asyncio.create_task(stream.emit(ExternalEvent(payload='title')))
+            elif isinstance(event, ExternalEvent):
+                assert event == ExternalEvent(payload='title')
+                released.set()
+
+    assert emitting is not None
+    assert await emitting == ExternalEvent(payload='title')
+    assert seen[seen.index('FunctionToolCallEvent') :] == snapshot(
+        [
+            'FunctionToolCallEvent',
+            'ExternalEvent',
+            'FunctionToolResultEvent',
+            'PartStartEvent',
+            'FinalResultEvent',
+            'PartEndEvent',
+            'AgentRunResultEvent',
+        ]
+    )
+
+
+async def test_run_stream_events_emit_before_start_rejected():
+    """Emitting before iteration starts the run fails loudly: no stream exists to deliver the event."""
+    agent = Agent(FunctionModel(stream_function=_tool_then_text))
+
+    async with agent.run_stream_events('go') as stream:
+        with pytest.raises(UserError, match='cannot be called before the run has started'):
+            await stream.emit(ExternalEvent())
+
+
+async def test_run_stream_events_emit_after_end_rejected():
+    """Emitting after the run has ended fails loudly instead of silently never delivering."""
+
+    async def only_text(messages: list[ModelMessage], info: AgentInfo) -> AsyncIterator[str]:
+        yield 'done'
+
+    agent = Agent(FunctionModel(stream_function=only_text))
+    async with agent.run_stream_events('go') as stream:
+        async for _ in stream:
+            pass
+        with pytest.raises(UserError, match='cannot be called after the run has ended'):
+            await stream.emit(ExternalEvent())
 
 
 async def test_surfaced_via_run_stream():

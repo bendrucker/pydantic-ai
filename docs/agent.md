@@ -308,7 +308,7 @@ Pydantic AI has two families of user-defined events. They ride the same stream a
 | | [`CustomEvent`][pydantic_ai.messages.CustomEvent] | [`CapabilityEvent`][pydantic_ai.messages.CapabilityEvent] |
 |---|---|---|
 | **Use it when** | your application wants to tell its own stream consumer or frontend something | your [capability](capabilities/overview.md) wants to tell other capabilities and the host application something |
-| **Emit from** | an application tool, an [output validator](output.md#output-validator-functions), a [hook](hooks.md), an `event_stream_handler`, or [`AgentRun.emit()`][pydantic_ai.run.AgentRun.emit] | a [capability](capabilities/custom.md) hook or a tool the capability contributes |
+| **Emit from** | an application tool, an [output validator](output.md#output-validator-functions), a [hook](hooks.md), an `event_stream_handler`, [`AgentRun.emit()`][pydantic_ai.run.AgentRun.emit], or [`AgentRunEvents.emit()`][pydantic_ai.agent.AgentRunEvents.emit] | a [capability](capabilities/custom.md) hook or a tool the capability contributes |
 | **Naming** | flat and process-wide, like `progress` | namespaced, like `workspace.file_read` |
 | **Reaches the frontend** | yes, via the [AG-UI](ui/ag-ui.md) and [Vercel AI](ui/vercel-ai.md) adapters | no, it is an internal signal; re-publish it as a `CustomEvent` if the frontend needs it |
 | **Can carry a decision** | no | yes, with `dispatch='immediate'` |
@@ -317,7 +317,7 @@ If you are writing a **capability**, define [`CapabilityEvent`][pydantic_ai.mess
 
 #### Defining and emitting an event
 
-Define an event as a dataclass subclass of `CustomEvent` — its fields are the payload, and consumers can use an `isinstance` check against the class. Await [`ctx.emit()`][pydantic_ai.tools.RunContext.emit] with an event instance from any of your application's async code that receives a [`RunContext`][pydantic_ai.tools.RunContext]; code driving `agent.iter()` uses [`AgentRun.emit()`][pydantic_ai.run.AgentRun.emit] instead. Sync tools cannot emit events; write async tools when they need to emit events. When emitted from within a tool call, the event's [`tool_call_id`][pydantic_ai.messages.CustomEvent.tool_call_id] and [`tool_name`][pydantic_ai.messages.CustomEvent.tool_name] are stamped automatically so consumers can attribute it to the originating call. The event reaches the `event_stream_handler`, `run_stream_events()`, `agent.iter()` streaming, and the [AG-UI](ui/ag-ui.md) and [Vercel AI](ui/vercel-ai.md) UI adapters.
+Define an event as a dataclass subclass of `CustomEvent` — its fields are the payload, and consumers can use an `isinstance` check against the class. Await [`ctx.emit()`][pydantic_ai.tools.RunContext.emit] with an event instance from any of your application's async code that receives a [`RunContext`][pydantic_ai.tools.RunContext]; code driving `agent.iter()` uses [`AgentRun.emit()`][pydantic_ai.run.AgentRun.emit] instead, and code consuming `run_stream_events()` uses [`AgentRunEvents.emit()`](#emitting-alongside-run-stream-events). Sync tools cannot emit events; write async tools when they need to emit events. When emitted from within a tool call, the event's [`tool_call_id`][pydantic_ai.messages.CustomEvent.tool_call_id] and [`tool_name`][pydantic_ai.messages.CustomEvent.tool_name] are stamped automatically so consumers can attribute it to the originating call. The event reaches the `event_stream_handler`, `run_stream_events()`, `agent.iter()` streaming, and the [AG-UI](ui/ag-ui.md) and [Vercel AI](ui/vercel-ai.md) UI adapters.
 
 ```python {title="custom_events.py"}
 from collections.abc import AsyncIterator
@@ -393,9 +393,58 @@ Any consumer of the run's events sees them: an [`@agent.on_event`](hooks.md#list
 
 The payload cannot use the field names the envelope needs for itself: `data`, `tool_call_id`, `tool_name`, and `event_kind` are rejected when the class is defined, so pick another name (`payload`, `call_id`) for a field that would collide.
 
-Emitting only works while the run is in progress and only from the family the emitting code owns, so each of these raises a [`UserError`][pydantic_ai.exceptions.UserError]: emitting a `CustomEvent` from a capability, emitting a [`CapabilityEvent`][pydantic_ai.messages.CapabilityEvent] from application code, and calling [`AgentRun.emit()`][pydantic_ai.run.AgentRun.emit] after the run has finished. Events emitted with `AgentRun.emit()` reach consumers that stream the run's nodes with `node.stream(run.ctx)`, as shown in [Streaming All Events and Output](#streaming-all-events-and-output); a bare `async for node in run` does not consume any event stream, so nothing surfaces.
+Emitting only works while the run is in progress and only from the family the emitting code owns, so each of these raises a [`UserError`][pydantic_ai.exceptions.UserError]: emitting a `CustomEvent` from a capability, emitting a [`CapabilityEvent`][pydantic_ai.messages.CapabilityEvent] from application code, and calling [`AgentRun.emit()`][pydantic_ai.run.AgentRun.emit] or [`AgentRunEvents.emit()`][pydantic_ai.agent.AgentRunEvents.emit] after the run has finished. Events emitted with `AgentRun.emit()` reach consumers that stream the run's nodes with `node.stream(run.ctx)`, as shown in [Streaming All Events and Output](#streaming-all-events-and-output); a bare `async for node in run` does not consume any event stream, so nothing surfaces.
 
 An event is delivered to stream consumers as soon as it is emitted, so a progress event surfaces while the emitting tool is still running rather than at its return. Events emitted from tools running concurrently interleave in emission order (best-effort ordering).
+
+#### Emitting alongside `run_stream_events()` {#emitting-alongside-run-stream-events}
+
+Work running beside the run can push events to the consumer of [`run_stream_events()`][pydantic_ai.agent.AbstractAgent.run_stream_events] by awaiting [`emit()`][pydantic_ai.agent.AgentRunEvents.emit] on the yielded handle. A chat endpoint can generate a conversation title in a background task this way and send it to the frontend as soon as it's ready. The event goes straight onto the stream the handle reads from, so it arrives on the consumer's next pull while the model is silent or a tool is still running. An event emitted with [`AgentRun.emit()`][pydantic_ai.run.AgentRun.emit] waits for the run's next node stream instead.
+
+```python {title="run_stream_events_emit.py"}
+import asyncio
+from dataclasses import dataclass
+
+from pydantic_ai import Agent, AgentRunEvents, AgentRunResultEvent, CustomEvent
+
+
+@dataclass(kw_only=True)
+class ChatTitleEvent(CustomEvent):
+    title: str
+
+
+agent = Agent('test')
+
+
+@agent.tool_plain
+async def search_flights(destination: str) -> str:
+    await asyncio.sleep(0.01)  # A slow API call, during which the model is silent.
+    return f'3 flights to {destination}'
+
+
+async def send_title(events: AgentRunEvents[str], prompt: str) -> None:
+    title = prompt.capitalize()  # In practice, a call to a small, fast model.
+    await events.emit(ChatTitleEvent(title=title))
+
+
+async def main():
+    prompt = 'find me a flight to lisbon'
+    async with agent.run_stream_events(prompt) as events:
+        title_task: asyncio.Task[None] | None = None
+        async for event in events:
+            if title_task is None:
+                title_task = asyncio.create_task(send_title(events, prompt))
+            if isinstance(event, ChatTitleEvent):
+                print(f'Title: {event.title}')
+                #> Title: Find me a flight to lisbon
+            elif isinstance(event, AgentRunResultEvent):
+                print('Run finished')
+                #> Run finished
+```
+
+_(This example is complete, it can be run "as is" — you'll need to add `asyncio.run(main())` to run `main`)_
+
+Because the event skips the run's own event pipeline, capabilities, [`@agent.on_event`](hooks.md#listening-without-a-hooks-capability) listeners, and an `event_stream_handler` don't see it, and it has no `tool_call_id`. The [AG-UI](ui/ag-ui.md) and [Vercel AI](ui/vercel-ai.md) adapters forward it like any other `CustomEvent`. The stream has no buffer, so `emit()` returns once the consumer has pulled the event. Calling it before iteration has started the run, or after the run has ended, raises a [`UserError`][pydantic_ai.exceptions.UserError].
 
 Events that share fields can share a base. Give the base its own `@dataclass` decorator — an undecorated one contributes no fields, which is rejected rather than left to surface as a payload quietly missing them — and mark it `abstract=True` so it stays out of the event registry and can't be emitted itself:
 

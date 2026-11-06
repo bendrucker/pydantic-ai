@@ -205,6 +205,16 @@ def _apply_nested_specs(data: Mapping[str, Any], include: IncExCall, exclude: In
     return filtered
 
 
+def reject_capability_event(event: _messages.CustomEvent) -> None:
+    """Raise `UserError` if application code tries to emit a `CapabilityEvent`, which belongs to capabilities."""
+    if isinstance(event, _messages.CapabilityEvent):
+        raise exceptions.UserError(
+            'Capability events belong to capabilities and can only be emitted from a capability hook or '
+            'capability-contributed tool. Application code should emit a `CustomEvent`; it can re-emit a '
+            'received capability event as one.'
+        )
+
+
 @dataclasses.dataclass(repr=False)
 class AgentRun(Generic[AgentDepsT, OutputDataT]):
     """A stateful, async-iterable run of an [`Agent`][pydantic_ai.agent.Agent].
@@ -791,12 +801,7 @@ class AgentRun(Generic[AgentDepsT, OutputDataT]):
             raise exceptions.UserError(
                 '`emit` cannot be called after the run has ended: nothing remains to deliver the event.'
             )
-        if isinstance(event, _messages.CapabilityEvent):
-            raise exceptions.UserError(
-                'Capability events belong to capabilities and can only be emitted from a capability hook or '
-                'capability-contributed tool. Application code should emit a `CustomEvent`; it can re-emit a '
-                'received capability event as one.'
-            )
+        reject_capability_event(event)
         self._graph_run.state.event_stream_buffer.append(event)
         return event
 

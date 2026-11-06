@@ -565,6 +565,20 @@ async def test_agent_run_cannot_emit_capability_event():
             pass
 
 
+async def test_run_stream_events_cannot_emit_capability_event():
+    """`AgentRunEvents.emit` is an application surface, so it rejects capability events too."""
+
+    async def model_function(messages: list[ModelMessage], info: AgentInfo) -> AsyncIterator[str]:
+        yield 'done'
+
+    agent = Agent(FunctionModel(stream_function=model_function))
+
+    async with agent.run_stream_events('go') as stream:
+        async for _ in stream:
+            with pytest.raises(UserError, match='Capability events belong to capabilities'):
+                await stream.emit(FileReadEvent(path='tool.txt'))  # pyright: ignore[reportArgumentType]
+
+
 async def test_capability_cannot_emit_custom_event():
     @dataclass
     class BadCapability(AbstractCapability[Any]):

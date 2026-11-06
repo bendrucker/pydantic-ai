@@ -20,7 +20,7 @@ from types import FrameType, TracebackType
 from typing import TYPE_CHECKING, Any, Generic, Literal, Self, TypeAlias, cast, overload
 
 import anyio
-from anyio.streams.memory import MemoryObjectReceiveStream
+from anyio.streams.memory import MemoryObjectReceiveStream, MemoryObjectSendStream
 from pydantic import TypeAdapter
 from typing_extensions import TypedDict, TypeIs, TypeVar
 
@@ -42,13 +42,13 @@ from .. import (
 from .._cancel import CancellationToken, RunBinding, provide_run_binding
 from .._json_schema import JsonSchema
 from .._output import types_from_output_spec
-from .._run_context import set_current_run_context
+from .._run_context import CustomEventT, set_current_run_context
 from ..capabilities import AgentCapability
 from ..conversation import Conversation
 from ..exceptions import RunCancelled
 from ..output import OutputDataT, OutputSpec, PendingModelResponse
 from ..result import AgentStream, FinalResult, StreamedRunResult
-from ..run import AgentRun, AgentRunResult, AgentRunResultEvent
+from ..run import AgentRun, AgentRunResult, AgentRunResultEvent, reject_capability_event
 from ..settings import ModelSettings
 from ..template import TemplateStr
 from ..tool_manager import ToolManager
@@ -168,6 +168,9 @@ class AgentRunEvents(
     def __init__(self, run_agent: _RunStreamEventsRunner[OutputDataT]) -> None:
         self._run_agent = run_agent
         self._binding = RunBinding()
+        self._send_stream: (
+            MemoryObjectSendStream[_messages.AgentStreamEvent | AgentRunResultEvent[OutputDataT]] | None
+        ) = None
         self._receive_stream: (
             MemoryObjectReceiveStream[_messages.AgentStreamEvent | AgentRunResultEvent[OutputDataT]] | None
         ) = None
@@ -212,6 +215,49 @@ class AgentRunEvents(
         all; iterating afterwards raises `RunCancelled` with empty `messages`.
         """
         self._binding.cancellation.cancel()
+
+    async def emit(self, event: CustomEventT, /) -> CustomEventT:
+        """Emit a [`CustomEvent`][pydantic_ai.messages.CustomEvent] to this iterator's consumer.
+
+        Lets application code running alongside the run, such as a background task, push events to
+        whoever is iterating. The event goes straight onto the stream this iterator reads from, so it
+        reaches the consumer on its next pull even while the model is silent, e.g. during a long tool
+        call. [`AgentRun.emit()`][pydantic_ai.run.AgentRun.emit], by contrast, buffers the event until
+        the run's next node stream is pulled.
+
+        Because the event skips the run's own event pipeline, it is not seen by capabilities,
+        [`@agent.on_event`](../hooks.md#listening-without-a-hooks-capability) listeners, or an
+        `event_stream_handler`, and it carries no `tool_call_id`. Use
+        [`RunContext.emit()`][pydantic_ai.tools.RunContext.emit] for events those should see.
+
+        The stream has no buffer, so this waits until the consumer pulls the event. Call it from the
+        event loop the run is on.
+
+        Args:
+            event: The [`CustomEvent`][pydantic_ai.messages.CustomEvent] to emit.
+
+        Returns:
+            The event as emitted.
+
+        Raises:
+            UserError: If iteration has not started the run yet, if the run has ended or the iterator
+                was closed (including while waiting for the consumer), or if passed a
+                [`CapabilityEvent`][pydantic_ai.messages.CapabilityEvent]: those belong to
+                capabilities, and code driving the run is application code.
+        """
+        if self._send_stream is None:
+            raise exceptions.UserError('`emit` cannot be called before the run has started; iterate the events first.')
+        reject_capability_event(event)
+        try:
+            # A clone keeps the stream open until this event is received, so an event emitted as the
+            # run finishes still arrives ahead of the trailing `AgentRunResultEvent`.
+            with self._send_stream.clone() as send_stream:
+                await send_stream.send(event)
+        except (anyio.ClosedResourceError, anyio.BrokenResourceError):
+            raise exceptions.UserError(
+                '`emit` cannot be called after the run has ended: nothing remains to deliver the event.'
+            ) from None
+        return event
 
     def all_messages(self) -> list[_messages.ModelMessage]:
         """Return all messages from the run, including messages supplied as history.
@@ -298,6 +344,7 @@ class AgentRunEvents(
         send_stream, receive_stream = anyio.create_memory_object_stream[
             _messages.AgentStreamEvent | AgentRunResultEvent[OutputDataT]
         ]()
+        self._send_stream = send_stream
         self._receive_stream = receive_stream
 
         async def event_stream_handler(_: RunContext[Any], events: AsyncIterable[_messages.AgentStreamEvent]) -> None:
